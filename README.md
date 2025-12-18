@@ -1,24 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Liquid PFP Maker
+
+A polished PFP Maker dapp: **upload a photo**, add **hats / glasses / seasonal beanies**, rotate/scale with an advanced transform UI, then **export a high-quality PNG** for Twitter/X or Discord.
+
+### What's inside
+
+- **Editor**: Fabric.js (drag, resize, rotate, selection, layers)
+- **High-quality reduction**: Pica (Lanczos resize + unsharp mask for crisp exports)
+- **UI**: Next.js App Router + Tailwind
+- **Branding**: Liquid SVG kit in `public/brand/`
+
+### Features
+
+- Upload image (drag & drop)
+- Add accessories from PNG library (`public/pfp/accessories/`)
+- Rotate/scale via on-canvas handles + fine-tune sliders
+- **Circle guide preview** (safe area for Twitter/Discord PFPs)
+- Export:
+  - Size: 512 / 1024 / 2048
+  - Background: transparent / off-black / off-white
+  - Shape: **square** or **circle** (transparent outside the circle)
+- Share on X/Twitter with pre-filled tweet
 
 ## Getting Started
 
-First, run the development server:
+First, install dependencies:
+
+```bash
+npm install
+```
+
+Then, run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The app entry is `src/app/page.tsx` and the editor lives in `src/components/pfp/PfpMaker.tsx`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Adding new accessories
+
+1. Add your PNG file to `public/pfp/accessories/` (transparent background recommended)
+2. Add a new entry to `src/lib/pfp/accessories.ts`:
+
+```typescript
+{
+  id: "my-accessory",
+  name: "My Accessory",
+  category: "Hats", // or "Glasses" or "Seasonal"
+  src: "/pfp/accessories/my-accessory.png",
+  suggestedY: 0.3, // 0..1 of canvas height
+  suggestedWidthRatio: 0.8, // 0..1 of canvas width
+}
+```
 
 ## Learn More
 
