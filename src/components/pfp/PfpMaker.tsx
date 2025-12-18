@@ -762,7 +762,7 @@ export function PfpMaker() {
                   className={`${buttonClass("secondary")} whitespace-nowrap`}
                   onClick={() => {
                     const text = encodeURIComponent(
-                      "Just created my PFP with Liquid PFP Maker! 🎨✨ @liquidtrading"
+                      "Just created my PFP with Liquid PFP Maker! 🎨✨ @liquidtrading update on github"
                     );
                     const twitterUrl = `https://twitter.com/intent/tweet?text=${text}`;
                     window.open(twitterUrl, "_blank", "noopener,noreferrer");
