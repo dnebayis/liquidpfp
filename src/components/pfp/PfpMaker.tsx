@@ -4,14 +4,14 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dropzone from "react-dropzone";
 import pica from "pica";
-import {
-  Canvas,
-  FabricImage,
-  FabricObject,
-} from "fabric";
 import { Download, Layers, RotateCcw, Trash2, Upload, Twitter } from "lucide-react";
 
 import { ACCESSORIES, type AccessoryDef } from "@/lib/pfp/accessories";
+
+// Types for Fabric.js (defined here to avoid SSR issues)
+type Canvas = any;
+type FabricImage = any;
+type FabricObject = any;
 
 const LOGICAL_SIZE = 1024;
 const CSS_SIZE = 560;
@@ -49,6 +49,8 @@ export function PfpMaker() {
   const photoRef = useRef<FabricImage | null>(null);
   const downloadLinkRef = useRef<HTMLAnchorElement | null>(null);
 
+  const [isClient, setIsClient] = useState(false);
+  const [fabricLoaded, setFabricLoaded] = useState(false);
   const [activeObject, setActiveObject] = useState<FabricObject | null>(null);
   const [, bumpSelectionTick] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -63,6 +65,29 @@ export function PfpMaker() {
   const [activeCategory, setActiveCategory] = useState<
     "All" | AccessoryDef["category"]
   >("All");
+
+  // Set isClient to true only on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Dynamically load Fabric.js only on the client side
+  useEffect(() => {
+    if (!isClient) return;
+
+    const loadFabric = async () => {
+      try {
+        const { Canvas, FabricImage, FabricObject } = await import("fabric");
+        // Now that fabric is loaded, we can initialize
+        setFabricLoaded(true);
+      } catch (error) {
+        console.error("Failed to load Fabric.js:", error);
+        setErrorMsg("Failed to load image editor. Please refresh the page.");
+      }
+    };
+
+    loadFabric();
+  }, [isClient]);
 
   const categories = useMemo(() => {
     const uniq = Array.from(new Set(ACCESSORIES.map((a) => a.category)));
@@ -97,60 +122,72 @@ export function PfpMaker() {
   }, []);
 
   useEffect(() => {
-    const host = canvasHostRef.current;
-    if (!host) return;
+    // Only initialize fabric on the client side after it's loaded
+    if (!isClient || !fabricLoaded) return;
+    
+    const initFabric = async () => {
+      const { Canvas, FabricImage } = await import("fabric");
+      
+      const host = canvasHostRef.current;
+      if (!host) return;
 
-    host.innerHTML = "";
-    const el = document.createElement("canvas");
-    host.appendChild(el);
-
-    const canvas = new Canvas(el, {
-      width: LOGICAL_SIZE,
-      height: LOGICAL_SIZE,
-      preserveObjectStacking: true,
-      selection: true,
-    });
-
-    canvas.setDimensions({ width: CSS_SIZE, height: CSS_SIZE }, { cssOnly: true });
-    canvas.calcOffset();
-
-    canvas.backgroundColor = "rgba(255,255,255,0)";
-    fabricRef.current = canvas;
-
-    const handleSelection = () => syncActiveObject();
-    canvas.on("selection:created", handleSelection);
-    canvas.on("selection:updated", handleSelection);
-    canvas.on("selection:cleared", handleSelection);
-    canvas.on("object:modified", handleSelection);
-    canvas.on("object:scaling", handleSelection);
-    canvas.on("object:rotating", handleSelection);
-    canvas.on("object:moving", handleSelection);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Backspace" && e.key !== "Delete") return;
-      const activeObjects = canvas.getActiveObjects() as FabricObject[];
-      if (!activeObjects.length) return;
-      for (const obj of activeObjects) {
-        if (photoRef.current && obj === photoRef.current) {
-          photoRef.current = null;
-        }
-        canvas.remove(obj);
-      }
-      canvas.discardActiveObject();
-      canvas.requestRenderAll();
-      syncActiveObject();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      canvas.dispose();
-      fabricRef.current = null;
-      photoRef.current = null;
-      setActiveObject(null);
       host.innerHTML = "";
+      const el = document.createElement("canvas");
+      host.appendChild(el);
+
+      const canvas = new Canvas(el, {
+        width: LOGICAL_SIZE,
+        height: LOGICAL_SIZE,
+        preserveObjectStacking: true,
+        selection: true,
+      });
+
+      canvas.setDimensions({ width: CSS_SIZE, height: CSS_SIZE }, { cssOnly: true });
+      canvas.calcOffset();
+
+      canvas.backgroundColor = "rgba(255,255,255,0)";
+      fabricRef.current = canvas;
+
+      const handleSelection = () => syncActiveObject();
+      canvas.on("selection:created", handleSelection);
+      canvas.on("selection:updated", handleSelection);
+      canvas.on("selection:cleared", handleSelection);
+      canvas.on("object:modified", handleSelection);
+      canvas.on("object:scaling", handleSelection);
+      canvas.on("object:rotating", handleSelection);
+      canvas.on("object:moving", handleSelection);
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== "Backspace" && e.key !== "Delete") return;
+        const activeObjects = canvas.getActiveObjects() as FabricObject[];
+        if (!activeObjects.length) return;
+        for (const obj of activeObjects) {
+          if (photoRef.current && obj === photoRef.current) {
+            photoRef.current = null;
+          }
+          canvas.remove(obj);
+        }
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+        syncActiveObject();
+      };
+      window.addEventListener("keydown", handleKeyDown);
+
+      return () => {
+        window.removeEventListener("keydown", handleKeyDown);
+        canvas.dispose();
+        fabricRef.current = null;
+        photoRef.current = null;
+        setActiveObject(null);
+        host.innerHTML = "";
+      };
     };
-  }, [syncActiveObject]);
+
+    const cleanup = initFabric();
+    return () => {
+      cleanup.then((fn) => fn && fn());
+    };
+  }, [isClient, fabricLoaded, syncActiveObject]);
 
   const fitObjectToCanvas = useCallback((obj: FabricObject, mode: "cover" | "contain") => {
     const canvas = fabricRef.current;
@@ -179,6 +216,9 @@ export function PfpMaker() {
 
   const handleUpload = useCallback(
     async (file: File) => {
+      if (!fabricLoaded) return;
+      
+      const { FabricImage } = await import("fabric");
       const canvas = fabricRef.current;
       if (!canvas) return;
       setErrorMsg(null);
@@ -212,11 +252,14 @@ export function PfpMaker() {
         URL.revokeObjectURL(url);
       }
     },
-    [ensurePhotoOnBottom, fitObjectToCanvas, syncActiveObject]
+    [ensurePhotoOnBottom, fitObjectToCanvas, syncActiveObject, fabricLoaded]
   );
 
   const addAccessory = useCallback(
     async (acc: AccessoryDef) => {
+      if (!fabricLoaded) return;
+      
+      const { FabricImage } = await import("fabric");
       const canvas = fabricRef.current;
       if (!canvas) return;
       setErrorMsg(null);
@@ -258,7 +301,7 @@ export function PfpMaker() {
         );
       }
     },
-    [ensurePhotoOnBottom, syncActiveObject]
+    [ensurePhotoOnBottom, syncActiveObject, fabricLoaded]
   );
 
   const deleteSelected = useCallback(() => {
@@ -373,6 +416,8 @@ export function PfpMaker() {
   );
 
   const exportPng = useCallback(async () => {
+    if (!fabricLoaded) return;
+    
     const canvas = fabricRef.current;
     if (!canvas) return;
     setExportError(null);
@@ -475,13 +520,61 @@ export function PfpMaker() {
       canvas.requestRenderAll();
       setIsExporting(false);
     }
-  }, [downloadUrl, exportBg, exportShape, exportSize]);
+  }, [downloadUrl, exportBg, exportShape, exportSize, fabricLoaded]);
 
   const selectedRotation = Math.round(activeObject?.angle ?? 0);
   const selectedScalePct = Math.round(
     Math.sqrt((activeObject?.scaleX ?? 1) * (activeObject?.scaleY ?? 1)) * 100
   );
   const selectedIsPhoto = Boolean(photoRef.current && activeObject === photoRef.current);
+
+  // Show loading state while fabric is loading
+  if (!isClient) {
+    return (
+      <div className="min-h-screen">
+        <header className="sticky top-0 z-20 border-b border-white/10 bg-[#0b0b10]/80 backdrop-blur">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
+            <div className="flex items-center gap-3">
+              <div className="h-7 w-7 bg-white/10 rounded animate-pulse"></div>
+              <div className="flex flex-col leading-tight">
+                <span className="text-sm font-semibold tracking-tight">Liquid PFP Maker</span>
+                <span className="text-xs text-[#ededff]/70">
+                  Loading...
+                </span>
+              </div>
+            </div>
+          </div>
+        </header>
+        
+        <main className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-6 px-5 py-8 lg:grid-cols-[1fr_360px]">
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <h1 className="text-lg font-semibold tracking-tight">Canvas</h1>
+                <p className="text-sm text-[#ededff]/70">
+                  Loading editor...
+                </p>
+              </div>
+            </div>
+            
+            <div className="mt-5 flex items-center justify-center">
+              <div className="relative rounded-2xl border border-white/10 bg-[#131318] p-4 w-full h-96 flex items-center justify-center">
+                <div className="text-[#ededff]/70">Loading image editor...</div>
+              </div>
+            </div>
+          </section>
+          
+          <aside className="rounded-3xl border border-white/10 bg-white/5 p-5">
+            <div className="space-y-5">
+              <div className="h-32 bg-white/5 rounded-2xl animate-pulse"></div>
+              <div className="h-64 bg-white/5 rounded-2xl animate-pulse"></div>
+              <div className="h-48 bg-white/5 rounded-2xl animate-pulse"></div>
+            </div>
+          </aside>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
@@ -793,7 +886,7 @@ export function PfpMaker() {
                 <button
                   className={`${buttonClass("primary")} whitespace-nowrap`}
                   onClick={() => void exportPng()}
-                  disabled={isExporting}
+                  disabled={isExporting || !fabricLoaded}
                 >
                   <Download size={16} />
                   {isExporting ? "Exporting..." : "Download PNG"}
@@ -892,5 +985,3 @@ export function PfpMaker() {
     </div>
   );
 }
-
-
