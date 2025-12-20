@@ -452,7 +452,7 @@ export function PfpMaker() {
       await new Promise<void>((resolve) => {
         setTimeout(() => {
           resolve();
-        }, 200); // Increased delay to ensure render completes
+        }, 300); // Increased delay to ensure render completes
       });
     
       const src = canvas.getElement();
@@ -460,59 +460,50 @@ export function PfpMaker() {
         throw new Error("Canvas element not available");
       }
     
-      // Create a higher quality export by working with larger canvases
+      // Create export canvas
       const exportCanvas = document.createElement("canvas");
-      const exportSizeLarge = Math.min(exportSize * 2, 4096); // Up to 4K for better quality
-      exportCanvas.width = exportSizeLarge;
-      exportCanvas.height = exportSizeLarge;
+      exportCanvas.width = exportSize;
+      exportCanvas.height = exportSize;
 
-      // Use higher quality resizing
-      const p = pica({
-        features: ['js', 'wasm', 'ww']
-      });
+      // Simple direct resize without pica for better compatibility
+      const ctx = exportCanvas.getContext('2d');
+      if (!ctx) {
+        throw new Error("Could not get canvas context");
+      }
       
-      await p.resize(src, exportCanvas, {
-        quality: 3, // Highest quality
-        unsharpAmount: 100,
-        unsharpRadius: 0.5,
-        unsharpThreshold: 0
-      });
+      // Draw the canvas content directly
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, exportSize, exportSize);
 
       let finalCanvas = exportCanvas;
       
       // Apply circular mask if needed
       if (exportShape === "circle") {
         finalCanvas = document.createElement("canvas");
-        finalCanvas.width = exportSizeLarge;
-        finalCanvas.height = exportSizeLarge;
-        
-        const ctx = finalCanvas.getContext("2d");
-        if (!ctx) {
+        finalCanvas.width = exportSize;
+        finalCanvas.height = exportSize;
+      
+        const ctx2 = finalCanvas.getContext("2d");
+        if (!ctx2) {
           throw new Error("Could not get canvas context");
         }
-        
+      
         // Draw circular clipping
-        ctx.clearRect(0, 0, exportSizeLarge, exportSizeLarge);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(exportSizeLarge / 2, exportSizeLarge / 2, exportSizeLarge / 2, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.drawImage(exportCanvas, 0, 0);
-        ctx.restore();
+        ctx2.clearRect(0, 0, exportSize, exportSize);
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.arc(exportSize / 2, exportSize / 2, exportSize / 2, 0, Math.PI * 2);
+        ctx2.clip();
+        ctx2.drawImage(exportCanvas, 0, 0);
+        ctx2.restore();
       }
 
-      // Convert to blob with better quality settings
-      const blob = await new Promise<Blob | null>((resolve) => {
-        finalCanvas.toBlob(
-          (blob) => resolve(blob),
-          "image/png",
-          1.0 // Maximum quality
-        );
-      });
-
-      if (!blob) {
-        throw new Error("Failed to create image blob");
-      }
+      // Convert to data URL first (more reliable than blob in some browsers)
+      const dataUrl = finalCanvas.toDataURL('image/png', 1.0);
+      
+      // Create blob from data URL for download
+      const blob = await fetch(dataUrl).then(res => res.blob());
 
       const nextUrl = URL.createObjectURL(blob);
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -520,49 +511,111 @@ export function PfpMaker() {
       setDownloadUrl(nextUrl);
       setDownloadName(nextName);
 
-      // Multiple fallback methods for download
-      const downloadWithFallback = () => {
-        // Method 1: Programmatic click
-        const a = document.createElement("a");
-        a.href = nextUrl;
-        a.download = nextName;
-        
-        // Check if document body is available
-        if (typeof document !== 'undefined' && document.body) {
-          try {
-            document.body.appendChild(a);
+      // Universal download approach that works on all devices
+      const universalDownload = () => {
+        try {
+          // Method 1: Try modern approach first
+          if ('showSaveFilePicker' in window) {
+            // Modern browser API (Chrome, Edge)
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = nextName;
             a.click();
-            document.body.removeChild(a);
             return true;
-          } catch (e) {
-            console.warn("Programmatic download failed, trying fallback", e);
           }
-        }
-        
-        // Method 2: Direct navigation (works even with extensions)
-        try {
-          window.location.assign(nextUrl);
+          
+          // Method 2: Traditional approach
+          const link = document.createElement('a');
+          link.href = nextUrl;
+          link.download = nextName;
+          
+          // For mobile devices, we need to handle this differently
+          if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+            // On mobile, open in new tab as fallback
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+          }
+          
+          // Trigger download
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          
+          // Clean up
+          setTimeout(() => {
+            URL.revokeObjectURL(nextUrl);
+          }, 1000);
+          
           return true;
         } catch (e) {
-          console.warn("Direct navigation failed", e);
+          console.warn("Universal download failed", e);
+          return false;
         }
-        
-        // Method 3: Open in new tab
-        try {
-          window.open(nextUrl, '_blank');
-          return true;
-        } catch (e) {
-          console.warn("Opening in new tab failed", e);
-        }
-        
-        return false;
       };
 
-      const success = downloadWithFallback();
+      // Mobile-friendly approach
+      const mobileFriendlyDownload = () => {
+        try {
+          // Create a temporary div to show download instructions
+          const container = document.createElement('div');
+          container.style.position = 'fixed';
+          container.style.top = '0';
+          container.style.left = '0';
+          container.style.width = '100%';
+          container.style.height = '100%';
+          container.style.backgroundColor = 'rgba(0,0,0,0.8)';
+          container.style.zIndex = '9999';
+          container.style.display = 'flex';
+          container.style.flexDirection = 'column';
+          container.style.justifyContent = 'center';
+          container.style.alignItems = 'center';
+          container.style.color = 'white';
+          container.style.fontFamily = 'Arial, sans-serif';
+          container.style.padding = '20px';
+          container.style.textAlign = 'center';
+          
+          container.innerHTML = `
+            <div style="background: #131318; padding: 30px; border-radius: 20px; max-width: 90%; width: 400px;">
+              <h2 style="margin-top: 0; color: #ededff;">Download Your PFP</h2>
+              <p style="color: #ededff/80; margin-bottom: 20px;">Tap and hold the image below, then select "Save Image" or "Download Image"</p>
+              <img src="${dataUrl}" style="max-width: 100%; border-radius: 10px; margin-bottom: 20px;" alt="Your PFP" />
+              <button id="close-download-modal" style="background: #ededff; color: #131318; border: none; padding: 12px 24px; border-radius: 10px; font-size: 16px; cursor: pointer; font-weight: bold;">
+                Close
+              </button>
+            </div>
+          `;
+          
+          document.body.appendChild(container);
+          
+          // Add close button handler
+          const closeButton = container.querySelector('#close-download-modal');
+          if (closeButton) {
+            closeButton.addEventListener('click', () => {
+              document.body.removeChild(container);
+            });
+          }
+          
+          return true;
+        } catch (e) {
+          console.warn("Mobile friendly download failed", e);
+          return false;
+        }
+      };
+
+      // Try universal download first
+      let success = universalDownload();
       
+      // If that fails and we're on mobile, try mobile-friendly approach
       if (!success) {
-        // If all methods fail, show manual download link
-        setExportError("Automatic download failed. Click the link below to download manually.");
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        if (isMobile) {
+          success = mobileFriendlyDownload();
+        }
+      }
+      
+      // If all else fails, show error with manual instructions
+      if (!success) {
+        setExportError("Download failed. Right-click the image in the preview below and select 'Save Image As...' or tap and hold on mobile.");
       }
 
       // Also update the hidden download link for accessibility
