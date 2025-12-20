@@ -452,7 +452,7 @@ export function PfpMaker() {
       await new Promise<void>((resolve) => {
         setTimeout(() => {
           resolve();
-        }, 150); // Increased delay to ensure render completes
+        }, 200); // Increased delay to ensure render completes
       });
     
       const src = canvas.getElement();
@@ -460,45 +460,59 @@ export function PfpMaker() {
         throw new Error("Canvas element not available");
       }
     
-      const resized = document.createElement("canvas");
-      resized.width = exportSize;
-      resized.height = exportSize;
+      // Create a higher quality export by working with larger canvases
+      const exportCanvas = document.createElement("canvas");
+      const exportSizeLarge = Math.min(exportSize * 2, 4096); // Up to 4K for better quality
+      exportCanvas.width = exportSizeLarge;
+      exportCanvas.height = exportSizeLarge;
 
-      const p = pica();
-      await p.resize(src, resized, {
-        unsharpAmount: 80,
-        unsharpRadius: 0.6,
-        unsharpThreshold: 2,
+      // Use higher quality resizing
+      const p = pica({
+        features: ['js', 'wasm', 'ww']
+      });
+      
+      await p.resize(src, exportCanvas, {
+        quality: 3, // Highest quality
+        unsharpAmount: 100,
+        unsharpRadius: 0.5,
+        unsharpThreshold: 0
       });
 
-      const finalCanvas =
-        exportShape === "circle" ? document.createElement("canvas") : resized;
+      let finalCanvas = exportCanvas;
+      
+      // Apply circular mask if needed
       if (exportShape === "circle") {
-        finalCanvas.width = exportSize;
-        finalCanvas.height = exportSize;
+        finalCanvas = document.createElement("canvas");
+        finalCanvas.width = exportSizeLarge;
+        finalCanvas.height = exportSizeLarge;
+        
         const ctx = finalCanvas.getContext("2d");
         if (!ctx) {
           throw new Error("Could not get canvas context");
         }
-        ctx.clearRect(0, 0, exportSize, exportSize);
+        
+        // Draw circular clipping
+        ctx.clearRect(0, 0, exportSizeLarge, exportSizeLarge);
         ctx.save();
         ctx.beginPath();
-        ctx.arc(exportSize / 2, exportSize / 2, exportSize / 2, 0, Math.PI * 2);
+        ctx.arc(exportSizeLarge / 2, exportSizeLarge / 2, exportSizeLarge / 2, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(resized, 0, 0);
+        ctx.drawImage(exportCanvas, 0, 0);
         ctx.restore();
       }
 
-      // Convert to blob using toBlob instead of pica's toBlob
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        (finalCanvas as HTMLCanvasElement).toBlob((blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error("Failed to create blob from canvas"));
-          }
-        }, "image/png", 1);
+      // Convert to blob with better quality settings
+      const blob = await new Promise<Blob | null>((resolve) => {
+        finalCanvas.toBlob(
+          (blob) => resolve(blob),
+          "image/png",
+          1.0 // Maximum quality
+        );
       });
+
+      if (!blob) {
+        throw new Error("Failed to create image blob");
+      }
 
       const nextUrl = URL.createObjectURL(blob);
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -506,32 +520,63 @@ export function PfpMaker() {
       setDownloadUrl(nextUrl);
       setDownloadName(nextName);
 
-      // Create and trigger download
-      const a = document.createElement("a");
-      a.href = nextUrl;
-      a.download = nextName;
+      // Multiple fallback methods for download
+      const downloadWithFallback = () => {
+        // Method 1: Programmatic click
+        const a = document.createElement("a");
+        a.href = nextUrl;
+        a.download = nextName;
+        
+        // Check if document body is available
+        if (typeof document !== 'undefined' && document.body) {
+          try {
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            return true;
+          } catch (e) {
+            console.warn("Programmatic download failed, trying fallback", e);
+          }
+        }
+        
+        // Method 2: Direct navigation (works even with extensions)
+        try {
+          window.location.assign(nextUrl);
+          return true;
+        } catch (e) {
+          console.warn("Direct navigation failed", e);
+        }
+        
+        // Method 3: Open in new tab
+        try {
+          window.open(nextUrl, '_blank');
+          return true;
+        } catch (e) {
+          console.warn("Opening in new tab failed", e);
+        }
+        
+        return false;
+      };
+
+      const success = downloadWithFallback();
       
-      // Check if document body is available
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a); // Clean up DOM
-      } else {
-        // Fallback: try to open in new tab
-        window.open(nextUrl, '_blank');
+      if (!success) {
+        // If all methods fail, show manual download link
+        setExportError("Automatic download failed. Click the link below to download manually.");
       }
 
+      // Also update the hidden download link for accessibility
       const refA = downloadLinkRef.current;
       if (refA) {
         refA.href = nextUrl;
         refA.download = nextName;
       }
     } catch (err) {
-      console.error("Export error:", err); // Log the actual error
-      const msg =
-        err instanceof Error ? err.message : "Export failed. Please try again.";
-      setExportError(msg);
+      console.error("Export error:", err);
+      const msg = err instanceof Error ? err.message : "Export failed. Please try again.";
+      setExportError(`Export failed: ${msg}`);
     } finally {
+      // Restore canvas state
       canvas.backgroundColor = prevBg;
       if (activeObj) {
         canvas.setActiveObject(activeObj);
