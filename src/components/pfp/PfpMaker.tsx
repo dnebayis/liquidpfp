@@ -395,7 +395,13 @@ export function PfpMaker() {
     canvas.requestRenderAll();
 
     try {
-      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      // Wait for render to complete
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          resolve();
+        }, 100); // Small delay to ensure render completes
+      });
+      
       const src = canvas.getElement();
       const resized = document.createElement("canvas");
       resized.width = exportSize;
@@ -414,7 +420,9 @@ export function PfpMaker() {
         finalCanvas.width = exportSize;
         finalCanvas.height = exportSize;
         const ctx = finalCanvas.getContext("2d");
-        if (!ctx) return;
+        if (!ctx) {
+          throw new Error("Could not get canvas context");
+        }
         ctx.clearRect(0, 0, exportSize, exportSize);
         ctx.save();
         ctx.beginPath();
@@ -424,7 +432,16 @@ export function PfpMaker() {
         ctx.restore();
       }
 
-      const blob = await p.toBlob(finalCanvas, "image/png", 1);
+      // Convert to blob using toBlob instead of pica's toBlob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        (finalCanvas as HTMLCanvasElement).toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("Failed to create blob from canvas"));
+          }
+        }, "image/png", 1);
+      });
 
       const nextUrl = URL.createObjectURL(blob);
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
@@ -432,12 +449,13 @@ export function PfpMaker() {
       setDownloadUrl(nextUrl);
       setDownloadName(nextName);
 
+      // Create and trigger download
       const a = document.createElement("a");
       a.href = nextUrl;
       a.download = nextName;
       document.body.appendChild(a);
       a.click();
-      a.remove();
+      document.body.removeChild(a); // Clean up DOM
 
       const refA = downloadLinkRef.current;
       if (refA) {
@@ -445,6 +463,7 @@ export function PfpMaker() {
         refA.download = nextName;
       }
     } catch (err) {
+      console.error("Export error:", err); // Log the actual error
       const msg =
         err instanceof Error ? err.message : "Export failed. Please try again.";
       setExportError(msg);
@@ -762,7 +781,7 @@ export function PfpMaker() {
                   className={`${buttonClass("secondary")} whitespace-nowrap`}
                   onClick={() => {
                     const text = encodeURIComponent(
-                      "Just created my PFP with Liquid PFP Maker! 🎨✨ @liquidtrading"
+                      "Just created my PFP with Liquid PFP Maker! 🎨✨ @liquidtrading https://liquid-pfp.vercel.app/"
                     );
                     const twitterUrl = `https://twitter.com/intent/tweet?text=${text}`;
                     window.open(twitterUrl, "_blank", "noopener,noreferrer");
