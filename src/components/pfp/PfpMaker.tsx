@@ -416,10 +416,18 @@ export function PfpMaker() {
   );
 
   const exportPng = useCallback(async () => {
-    if (!fabricLoaded) return;
+    // Ensure fabric is loaded and canvas is available
+    if (!fabricLoaded || !fabricRef.current) {
+      setExportError("Editor not ready. Please try again in a moment.");
+      return;
+    }
     
     const canvas = fabricRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      setExportError("Canvas not available. Please try again.");
+      return;
+    }
+    
     setExportError(null);
     setIsExporting(true);
 
@@ -432,7 +440,7 @@ export function PfpMaker() {
           : "#ededff";
 
     canvas.backgroundColor = bg;
-    
+  
     const activeObj = canvas.getActiveObject();
     if (activeObj) {
       canvas.discardActiveObject();
@@ -444,10 +452,14 @@ export function PfpMaker() {
       await new Promise<void>((resolve) => {
         setTimeout(() => {
           resolve();
-        }, 100); // Small delay to ensure render completes
+        }, 150); // Increased delay to ensure render completes
       });
-      
+    
       const src = canvas.getElement();
+      if (!src) {
+        throw new Error("Canvas element not available");
+      }
+    
       const resized = document.createElement("canvas");
       resized.width = exportSize;
       resized.height = exportSize;
@@ -498,9 +510,16 @@ export function PfpMaker() {
       const a = document.createElement("a");
       a.href = nextUrl;
       a.download = nextName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a); // Clean up DOM
+      
+      // Check if document body is available
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a); // Clean up DOM
+      } else {
+        // Fallback: try to open in new tab
+        window.open(nextUrl, '_blank');
+      }
 
       const refA = downloadLinkRef.current;
       if (refA) {
